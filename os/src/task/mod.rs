@@ -12,11 +12,14 @@
 mod context;
 mod switch;
 #[allow(clippy::module_inception)]
-mod task;
+pub mod task;
+
 
 use crate::config::MAX_APP_NUM;
 use crate::loader::{get_num_app, init_app_cx};
 use crate::sync::UPSafeCell;
+use crate::task::task::TaskInfo;
+use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
@@ -42,7 +45,7 @@ pub struct TaskManager {
 /// Inner of Task Manager
 pub struct TaskManagerInner {
     /// task list
-    tasks: [TaskControlBlock; MAX_APP_NUM],
+    tasks: Vec<TaskControlBlock>,
     /// id of current `Running` task
     current_task: usize,
 }
@@ -51,10 +54,17 @@ lazy_static! {
     /// Global variable: TASK_MANAGER
     pub static ref TASK_MANAGER: TaskManager = {
         let num_app = get_num_app();
-        let mut tasks = [TaskControlBlock {
-            task_cx: TaskContext::zero_init(),
-            task_status: TaskStatus::UnInit,
-        }; MAX_APP_NUM];
+        // let mut tasks = [TaskControlBlock {
+        //     task_cx: TaskContext::zero_init(),
+        //     task_status: TaskStatus::UnInit,
+        //     task_info: TaskInfo::new(),
+        // }; MAX_APP_NUM];
+    let mut tasks: Vec<_> = (0..MAX_APP_NUM).map(|_| TaskControlBlock {
+        task_cx: TaskContext::zero_init(),
+        task_status: TaskStatus::UnInit,
+        task_info: TaskInfo::new(),
+        time: 0
+    }).collect();
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
             task.task_status = TaskStatus::Ready;
@@ -89,6 +99,12 @@ impl TaskManager {
         }
         panic!("unreachable in run_first_task!");
     }
+    /// 
+    pub fn modify_syscall_times(&self, syscall_id: usize){
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].task_info.syscall_times[syscall_id] += 1;
+    }
 
     /// Change the status of current `Running` task into `Ready`.
     fn mark_current_suspended(&self) {
@@ -102,6 +118,25 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
         inner.tasks[current].task_status = TaskStatus::Exited;
+    }
+    ///
+    pub fn modify_time(&self, t: usize){
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        if  inner.tasks[current].time == 0 {
+            inner.tasks[current].time = t;
+        }
+        inner.tasks[current].task_info.time_duration = t - inner.tasks[current].time;
+       
+    }
+    /// 
+    pub fn get_info(&self) -> TaskInfo{
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        let mut new_info = TaskInfo::new();
+        new_info.time_duration = inner.tasks[current].task_info.time_duration;
+        new_info.syscall_times = inner.tasks[current].task_info.syscall_times.clone();
+        new_info
     }
 
     /// Find next task to run and return task id.
