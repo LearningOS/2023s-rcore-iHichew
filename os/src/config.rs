@@ -23,3 +23,7 @@ pub const TRAP_CONTEXT_BASE: usize = TRAMPOLINE - PAGE_SIZE;
 pub const CLOCK_FREQ: usize = 12500000;
 /// the physical memory end
 pub const MEMORY_END: usize = 0x88000000;
+
+
+pub const MMAP_START: usize = 0x6000_0000;
+pub const MMAP_END: usize = 0x8000_0000;

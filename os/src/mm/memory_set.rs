@@ -5,7 +5,7 @@ use super::{PTEFlags, PageTable, PageTableEntry};
 use super::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum};
 use super::{StepByOne, VPNRange};
 use crate::config::{
-    KERNEL_STACK_SIZE, MEMORY_END, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT_BASE, USER_STACK_SIZE,
+    KERNEL_STACK_SIZE, MEMORY_END, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT_BASE, USER_STACK_SIZE, MMAP_END,
 };
 use crate::sync::UPSafeCell;
 use alloc::collections::BTreeMap;
@@ -14,6 +14,7 @@ use alloc::vec::Vec;
 use core::arch::asm;
 use lazy_static::*;
 use riscv::register::satp;
+
 
 extern "C" {
     fn stext();
@@ -78,6 +79,54 @@ impl MemorySet {
             PTEFlags::R | PTEFlags::X,
         );
     }
+
+    pub fn mmap(&mut self, st: usize, len: usize, port: usize) -> isize{
+        if st & 0xFFF != 0{
+            return -1;
+        }
+        //println!("=================111====");
+        if port & !0x7 != 0 || port & 0x7 == 0{
+            return -1;
+        }
+        //println!("=================222====");
+        if self.page_table.check_va(st.into(), len) == false{
+            return -1;
+        }
+        //println!("=================333====");
+        self.insert_framed_area(st.into(), (st+len).into(), 
+            MapPermission::from_bits(((port as u8) << 1) | (1 << 4)).unwrap());
+        
+        // let new_area = 
+        // MapArea::new(VirtAddr(st), VirtAddr(st+len), MapType::Framed, MapPermission { bits: port as u8 });
+        // self.push(new_area, None);
+        0
+    }
+
+    pub fn munmap(&mut self, st: usize, len: usize) -> isize{
+        if st & 0xFFF != 0{
+            return -1;
+        }
+        if len & 0xFFF != 0{
+            return -1;
+        }
+        let start_va :VirtAddr = st.into();
+        let end_va: VirtAddr = (st+ len).into();
+        let end_van  = end_va.ceil();
+        let start_van = start_va.floor();
+        let mut k = 0;
+        //println!("check munumap vpn {:?}",start_van);
+        if self.page_table.check_va(st.into(), len) == true{
+            return -1;
+        }
+
+        while start_van.0 + k < end_van.0 {
+            self.page_table.unmap((start_van.0 + k).into());
+            k += 1;
+        }
+        println!("check munumap=================");
+        return 0;
+    }
+
     /// Without kernel stacks.
     pub fn new_kernel() -> Self {
         let mut memory_set = Self::new_bare();
@@ -287,6 +336,22 @@ impl MapArea {
             map_perm,
         }
     }
+    // #[allow(unused)]
+    // pub fn check_overlap(&self, start_va: VirtAddr, len:usize) -> bool{
+    //     let end_va: VirtAddr = (start_va.0 + len).into();
+    //     let end_van  = end_va.ceil();
+    //     let start_van = start_va.floor();
+    //     let mut k = 0;
+    //     while(start_van.0 + k< end_van.0){
+    //         let new_van = VirtPageNum(start_van.0 + k);
+    //         if self.data_frames.contains_key(&new_van){
+    //             return false;
+    //         }
+    //         k += 1;
+    //     }
+    //     true
+    // }
+
     pub fn map_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) {
         let ppn: PhysPageNum;
         match self.map_type {

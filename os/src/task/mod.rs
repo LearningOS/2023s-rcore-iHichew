@@ -14,8 +14,11 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
+
 use crate::loader::{get_app_data, get_num_app};
+use crate::mm::MemorySet;
 use crate::sync::UPSafeCell;
+use crate::syscall::process::TaskInfo;
 use crate::trap::TrapContext;
 use alloc::vec::Vec;
 use lazy_static::*;
@@ -89,6 +92,22 @@ impl TaskManager {
         panic!("unreachable in run_first_task!");
     }
 
+    pub fn modify_syscall_times(&self, syscall_id: usize){
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].task_info.syscall_times[syscall_id] += 1;
+    }
+
+    pub fn modify_time(&self, t: usize){
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        if  inner.tasks[current].time == 0 {
+            inner.tasks[current].time = t;
+        }
+        inner.tasks[current].task_info.time = t - inner.tasks[current].time;
+       
+    }
+
     /// Change the status of current `Running` task into `Ready`.
     fn mark_current_suspended(&self) {
         let mut inner = self.inner.exclusive_access();
@@ -101,6 +120,27 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let cur = inner.current_task;
         inner.tasks[cur].task_status = TaskStatus::Exited;
+    }
+
+    pub fn get_info(&self) -> TaskInfo{
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        let mut new_info = TaskInfo::new();
+        new_info.time = inner.tasks[current].task_info.time;
+        new_info.syscall_times = inner.tasks[current].task_info.syscall_times.clone();
+        new_info
+    }
+
+    pub fn mmap(&self, st: usize, len: usize, port: usize) -> isize{
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].memory_set.mmap(st, len, port)
+    }
+
+    pub fn munmap(&self, st: usize, len: usize) -> isize{
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].memory_set.munmap(st, len)
     }
 
     /// Find next task to run and return task id.

@@ -1,6 +1,7 @@
 //! Implementation of [`PageTableEntry`] and [`PageTable`].
 
-use super::{frame_alloc, FrameTracker, PhysPageNum, StepByOne, VirtAddr, VirtPageNum};
+use super::{frame_alloc, FrameTracker, PhysPageNum, StepByOne, VirtAddr, VirtPageNum, PhysAddr};
+use _core::arch::asm;
 use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::*;
@@ -142,6 +143,44 @@ impl PageTable {
     /// get the page table entry from the virtual page number
     pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
         self.find_pte(vpn).map(|pte| *pte)
+    }
+
+    pub fn check_va(&self, start_va: VirtAddr, len: usize) -> bool{
+        //unsafe {asm!("sfence.vma");}
+        let end_va: VirtAddr = (start_va.0 + len).into();
+        let end_van  = end_va.ceil();
+        let start_van = start_va.floor();
+        let mut k = 0;
+        //println!("check start vpn {:?} end vpn {:?}",start_van, end_van);
+        // if start_van.0 == 0x10001{
+        //     return true;
+        // }
+        while start_van.0 + k < end_van.0 {
+            let new_van = VirtPageNum(start_van.0 + k);
+            //println!("check vpn {:?}",new_van);
+            match self.translate(new_van){
+                Some(a) => {
+                    if a.is_valid() {
+                        return false;
+                    }else{
+                        k = k+ 1;
+                    }
+                }
+                None => {k = k + 1},      
+            };
+        }
+        //println!("return value is true");
+        true
+    }
+    pub fn translate_va(&self, va: VirtAddr) -> Option<PhysAddr> {
+        self.find_pte(va.clone().floor()).map(|pte| {
+            //println!("translate_va:va = {:?}", va);
+            let aligned_pa: PhysAddr = pte.ppn().into();
+            //println!("translate_va:pa_align = {:?}", aligned_pa);
+            let offset = va.page_offset();
+            let aligned_pa_usize: usize = aligned_pa.into();
+            (aligned_pa_usize + offset).into()
+        })
     }
     /// get the token from the page table
     pub fn token(&self) -> usize {
